@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111318">
+  <title>뚱띠TV 익명채팅방</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#111318; --panel:#1b1e27; --panel2:#242936; --text:#f3f4f8;
+      --muted:#9ba3b4; --accent:#8b7cf6; --border:#303644; --danger:#ff8585;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; min-height:100vh; background:var(--bg); color:var(--text);
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      display:flex; justify-content:center;
+    }
+    .app { width:100%; max-width:760px; height:100dvh; min-height:420px; display:flex; flex-direction:column; }
+    header {
+      flex:none; padding:15px 16px; background:rgba(27,30,39,.98);
+      border-bottom:1px solid var(--border); display:flex; align-items:center;
+      justify-content:space-between; gap:12px;
+    }
+    h1 { margin:0; font-size:18px; }
+    .sub { color:var(--muted); font-size:12px; margin-top:4px; }
+    .status { color:#83dfad; font-size:12px; white-space:nowrap; }
+    .notice {
+      flex:none; margin:10px 12px 0; padding:9px 11px; border-radius:11px;
+      background:#292641; color:#dedaff; font-size:12px; line-height:1.5;
+    }
+    #messages {
+      flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+      padding:12px 14px 18px; display:flex; flex-direction:column; gap:12px;
+      scroll-behavior:auto;
+    }
+    .history-state { flex:none; text-align:center; color:var(--muted); font-size:11px; padding:5px 0 9px; }
+    .message { max-width:86%; align-self:flex-start; }
+    .message.mine { align-self:flex-end; }
+    .meta { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:11px; margin:0 7px 5px; }
+    .bubble {
+      padding:10px 13px; border-radius:16px; background:var(--panel2);
+      overflow-wrap:anywhere; white-space:pre-wrap; line-height:1.45; font-size:14px;
+    }
+    .mine .bubble { background:#5146a5; }
+    .message-actions { margin:4px 7px 0; }
+    .report { border:0; background:transparent; color:var(--muted); font-size:11px; padding:3px; }
+    .empty { color:var(--muted); text-align:center; margin:auto 0; font-size:14px; }
+    .composer {
+      flex:none; padding:11px 14px max(11px,env(safe-area-inset-bottom));
+      background:var(--panel); border-top:1px solid var(--border);
+    }
+    .name-row { display:flex; gap:8px; margin-bottom:8px; }
+    input {
+      min-width:0; color:var(--text); background:var(--panel2);
+      border:1px solid var(--border); border-radius:12px; padding:11px;
+      outline:none; font:inherit;
+    }
+    input:focus { border-color:var(--accent); }
+    #nickname { width:100%; font-size:13px; padding:8px 10px; }
+    .send-row { display:flex; gap:8px; }
+    #messageInput { flex:1; }
+    button {
+      border:0; border-radius:12px; padding:0 17px; color:white;
+      background:var(--accent); font:inherit; font-weight:650; cursor:pointer;
+    }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    #error { color:var(--danger); font-size:12px; padding:6px 2px 0; }
+    .footer { color:var(--muted); font-size:11px; text-align:center; padding-top:7px; }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div>
+        <h1>📺 뚱띠TV 익명채팅방</h1>
+        <div class="sub">실시간 공개 채팅방 · 최신 대화부터 표시</div>
+      </div>
+      <div class="status" id="status">연결 준비 중</div>
+    </header>
+
+    <div class="notice">
+      익명 닉네임으로 대화할 수 있어요. 실명, 전화번호, 학교, 주소 등 개인정보는 올리지 마세요.
+    </div>
+
+    <section id="messages" aria-live="polite">
+      <div class="history-state" id="historyState">최근 메시지를 불러오는 중…</div>
+      <div class="empty" id="empty">채팅을 연결하고 있어요…</div>
+    </section>
+
+    <form class="composer" id="chatForm">
+      <div class="name-row">
+        <input id="nickname" maxlength="16" placeholder="익명 닉네임" aria-label="익명 닉네임">
+      </div>
+      <div class="send-row">
+        <input id="messageInput" maxlength="500" placeholder="메시지를 입력하세요…" autocomplete="off" aria-label="메시지" required>
+        <button id="sendButton" type="submit" disabled>전송</button>
+      </div>
+      <div id="error" role="status"></div>
+      <div class="footer">위로 스크롤하면 이전 메시지를 불러옵니다.</div>
+    </form>
+  </main>
+
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDI9ygzpduvSXl8iayPFsJ0qTwrza9B6uY",
+      authDomain: "anonymous-chat-9cc26.firebaseapp.com",
+      projectId: "anonymous-chat-9cc26",
+      storageBucket: "anonymous-chat-9cc26.firebasestorage.app",
+      messagingSenderId: "20872212384",
+      appId: "1:20872212384:web:1fcc2e28d084e6bde33ec5"
+    };
+
+    const ROOM_ID = "ttungtti-tv";
+    const PAGE_SIZE = 30;
+    const messagesEl = document.getElementById("messages");
+    const historyState = document.getElementById("historyState");
+    const emptyEl = document.getElementById("empty");
+    const statusEl = document.getElementById("status");
+    const errorEl = document.getElementById("error");
+    const nicknameEl = document.getElementById("nickname");
+    const messageInput = document.getElementById("messageInput");
+    const sendButton = document.getElementById("sendButton");
+    const chatForm = document.getElementById("chatForm");
+
+    const randomName = "익명" + Math.floor(1000 + Math.random() * 9000);
+    nicknameEl.value = randomName;
+
+    let currentUid = null;
+    let roomRef = null;
+    let latestUnsubscribe = null;
+    let olderCursor = null;
+    let loadingOlder = false;
+    let hasMoreOlder = true;
+    let firstSnapshot = true;
+    const loadedMessages = new Map();
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+
+    auth.signInAnonymously().then(credential => {
+      currentUid = credential.user.uid;
+      roomRef = db.collection("rooms").doc(ROOM_ID).collection("messages");
+      statusEl.textContent = "실시간 연결됨";
+      sendButton.disabled = false;
+
+      latestUnsubscribe = roomRef.orderBy("createdAt", "desc").limit(PAGE_SIZE)
+        .onSnapshot(snapshot => {
+          const wasAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 100;
+          snapshot.docChanges().forEach(change => {
+            loadedMessages.set(change.doc.id, change.doc);
+          });
+          if (snapshot.docs.length) {
+            olderCursor = snapshot.docs[snapshot.docs.length - 1];
+          }
+          renderMessages();
+          if (firstSnapshot || wasAtBottom) {
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
+          firstSnapshot = false;
+        }, error => {
+          statusEl.textContent = "연결 오류";
+          errorEl.textContent = "메시지를 불러오지 못했어요. Firestore 보안 규칙을 확인해 주세요.";
+          historyState.textContent = "";
+          console.error(error);
+        });
+    }).catch(error => {
+      statusEl.textContent = "로그인 오류";
+      errorEl.textContent = "익명 로그인을 시작하지 못했어요. Firebase Authentication 설정을 확인해 주세요.";
+      historyState.textContent = "";
+      console.error(error);
+    });
+
+    function timestampOf(doc) {
+      const data = doc.data();
+      return data.createdAt && data.createdAt.toMillis ? data.createdAt.toMillis() : 0;
+    }
+
+    function renderMessages() {
+      const ordered = Array.from(loadedMessages.values()).sort((a, b) => {
+        const difference = timestampOf(a) - timestampOf(b);
+        return difference || a.id.localeCompare(b.id);
+      });
+
+      messagesEl.innerHTML = "";
+      const state = document.createElement("div");
+      state.className = "history-state";
+      state.id = "historyState";
+      state.textContent = hasMoreOlder ? "위로 스크롤하면 이전 메시지를 불러옵니다" : "가장 오래된 메시지입니다";
+      messagesEl.appendChild(state);
+
+      if (!ordered.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "아직 메시지가 없어요. 첫 메시지를 남겨보세요!";
+        messagesEl.appendChild(empty);
+        return;
+      }
+      ordered.forEach(doc => renderMessage(doc));
+    }
+
+    function renderMessage(doc) {
+      const data = doc.data();
+      const wrap = document.createElement("article");
+      wrap.className = "message" + (data.uid === currentUid ? " mine" : "");
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const name = document.createElement("span");
+      name.textContent = String(data.nickname || "익명").slice(0, 16);
+      const time = document.createElement("span");
+      const date = data.createdAt && data.createdAt.toDate ? data.createdAt.toDate() : null;
+      time.textContent = date ? date.toLocaleTimeString("ko-KR", {hour:"2-digit", minute:"2-digit"}) : "방금";
+      meta.append(name, time);
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = String(data.text || "").slice(0, 500);
+      wrap.append(meta, bubble);
+
+      if (data.uid !== currentUid) {
+        const actions = document.createElement("div");
+        actions.className = "message-actions";
+        const report = document.createElement("button");
+        report.type = "button";
+        report.className = "report";
+        report.textContent = "신고";
+        report.addEventListener("click", () => {
+          alert("부적절한 메시지는 운영자에게 알려주세요. 개인정보나 위험한 내용은 채팅에 공유하지 마세요.");
+        });
+        actions.appendChild(report);
+        wrap.appendChild(actions);
+      }
+      messagesEl.appendChild(wrap);
+    }
+
+    async function loadOlderMessages() {
+      if (loadingOlder || !hasMoreOlder || !olderCursor || !roomRef) return;
+      loadingOlder = true;
+      const oldHeight = messagesEl.scrollHeight;
+      const oldTop = messagesEl.scrollTop;
+      historyState.textContent = "이전 메시지를 불러오는 중…";
+      try {
+        const snapshot = await roomRef.orderBy("createdAt", "desc")
+          .startAfter(olderCursor).limit(PAGE_SIZE).get();
+
+        snapshot.docs.forEach(doc => loadedMessages.set(doc.id, doc));
+        if (snapshot.docs.length) olderCursor = snapshot.docs[snapshot.docs.length - 1];
+        if (snapshot.docs.length < PAGE_SIZE) hasMoreOlder = false;
+
+        renderMessages();
+        messagesEl.scrollTop = oldTop + (messagesEl.scrollHeight - oldHeight);
+      } catch (error) {
+        errorEl.textContent = "이전 메시지를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.";
+        console.error(error);
+      } finally {
+        loadingOlder = false;
+        const stateEl = document.getElementById("historyState");
+        if (stateEl && !hasMoreOlder) stateEl.textContent = "가장 오래된 메시지입니다";
+      }
+    }
+
+    messagesEl.addEventListener("scroll", () => {
+      if (messagesEl.scrollTop < 70) loadOlderMessages();
+    });
+
+    chatForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const text = messageInput.value.trim();
+      const nickname = nicknameEl.value.trim().slice(0, 16) || randomName;
+      if (!text || !currentUid || !roomRef) return;
+      if (text.length > 500) {
+        errorEl.textContent = "메시지는 500자까지 입력할 수 있어요.";
+        return;
+      }
+      sendButton.disabled = true;
+      errorEl.textContent = "";
+      try {
+        await roomRef.add({
+          uid: currentUid,
+          nickname,
+          text,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        messageInput.value = "";
+        messageInput.focus();
+      } catch (error) {
+        errorEl.textContent = "전송에 실패했어요. Firestore 보안 규칙을 확인해 주세요.";
+        console.error(error);
+      } finally {
+        sendButton.disabled = false;
+      }
+    });
+
+    window.addEventListener("beforeunload", () => {
+      if (latestUnsubscribe) latestUnsubscribe();
+    });
+  </script>
+</body>
+</html>
